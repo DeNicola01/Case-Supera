@@ -1,10 +1,12 @@
--- Inserir usuários (senhas são "senha123" criptografadas com BCrypt)
+-- Inserir usuários (senhas em texto plano - serão criptografadas automaticamente pelo JPA)
+-- IMPORTANTE: As senhas serão automaticamente convertidas para BCrypt pelo @PrePersist
 INSERT INTO users (email, password, name, department) VALUES
-('ti@supera.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'João Silva - TI', 'TI'),
-('financeiro@supera.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Maria Santos - Financeiro', 'FINANCEIRO'),
-('rh@supera.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Pedro Oliveira - RH', 'RH'),
-('operacoes@supera.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Ana Costa - Operações', 'OPERACOES'),
-('outros@supera.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Carlos Mendes - Outros', 'OUTROS');
+('ti@supera.com', 'senha123', 'João Silva - TI', 'TI'),
+('financeiro@supera.com', 'senha123', 'Maria Santos - Financeiro', 'FINANCEIRO'),
+('rh@supera.com', 'senha123', 'Pedro Oliveira - RH', 'RH'),
+('operacoes@supera.com', 'senha123', 'Ana Costa - Operações', 'OPERACOES'),
+('outros@supera.com', 'senha123', 'Carlos Mendes - Outros', 'OUTROS')
+ON CONFLICT (email) DO NOTHING;
 
 -- Inserir módulos
 INSERT INTO modules (name, description, active) VALUES
@@ -17,7 +19,8 @@ INSERT INTO modules (name, description, active) VALUES
 ('Colaborador RH', 'Módulo para colaboradores do RH', true),
 ('Gestão de Estoque', 'Sistema de gestão de estoque', true),
 ('Compras', 'Sistema de gestão de compras', true),
-('Auditoria', 'Módulo de auditoria do sistema', true);
+('Auditoria', 'Módulo de auditoria do sistema', true)
+ON CONFLICT (name) DO NOTHING;
 
 -- Configurar departamentos permitidos por módulo
 -- Portal do Colaborador - todos os departamentos

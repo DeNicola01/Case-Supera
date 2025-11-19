@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -16,6 +17,8 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 public class User {
+
+    private static final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -41,5 +44,13 @@ public class User {
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private Set<UserModule> activeModules = new HashSet<>();
+
+    @PrePersist
+    @PreUpdate
+    private void hashPassword() {
+        if (password != null && !password.startsWith("$2a$")) {
+            this.password = passwordEncoder.encode(this.password);
+        }
+    }
 }
 

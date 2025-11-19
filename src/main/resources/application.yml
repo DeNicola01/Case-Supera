@@ -20,8 +20,7 @@ spring:
   
   sql:
     init:
-      mode: always
-      data-locations: classpath:data.sql
+      mode: never
 
 server:
   port: ${SERVER_PORT:8080}
@@ -35,6 +34,9 @@ springdoc:
     path: /api-docs
   swagger-ui:
     path: /swagger-ui.html
+    use-root-path: true
+  default-consumes-media-type: application/json
+  default-produces-media-type: application/json
 
 management:
   endpoints:
