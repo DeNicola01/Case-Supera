@@ -6,7 +6,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import br.com.supera.case_supera.repository.UserRepository;
 
 import java.util.List;
 
@@ -17,15 +20,24 @@ import java.util.List;
 public class ModuleController {
 
     private final ModuleService moduleService;
+    private final UserRepository userRepository;
 
-    public ModuleController(ModuleService moduleService) {
+    public ModuleController(ModuleService moduleService, UserRepository userRepository) {
         this.moduleService = moduleService;
+        this.userRepository = userRepository;
+    }
+
+    private br.com.supera.case_supera.entity.User getCurrentUser(Authentication authentication) {
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        return userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
     }
 
     @GetMapping
-    @Operation(summary = "Listar módulos disponíveis", description = "Retorna todos os módulos disponíveis no sistema")
-    public ResponseEntity<List<ModuleResponseDTO>> getAvailableModules() {
-        List<ModuleResponseDTO> modules = moduleService.getAvailableModules();
+    @Operation(summary = "Listar módulos disponíveis", description = "Retorna os módulos disponíveis para o departamento do usuário autenticado")
+    public ResponseEntity<List<ModuleResponseDTO>> getAvailableModules(Authentication authentication) {
+        br.com.supera.case_supera.entity.User user = getCurrentUser(authentication);
+        List<ModuleResponseDTO> modules = moduleService.getAvailableModules(user);
         return ResponseEntity.ok(modules);
     }
 

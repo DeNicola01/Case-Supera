@@ -21,6 +21,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNotNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -91,7 +92,7 @@ class AuthServiceTest {
         assertThrows(BadCredentialsException.class, () -> authService.login(loginRequest));
 
         verify(authenticationManager).authenticate(eq(new UsernamePasswordAuthenticationToken("test@supera.com", "senha123")));
-        verify(tokenProvider, never()).generateToken(any());
+        verify(tokenProvider, never()).generateToken(isNotNull());
     }
 
     @Test

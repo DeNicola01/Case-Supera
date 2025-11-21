@@ -24,7 +24,7 @@ public class AccessHistory {
     @JoinColumn(name = "request_id", nullable = false)
     private AccessRequest accessRequest;
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     @Enumerated(EnumType.STRING)
     private RequestStatus previousStatus;
 

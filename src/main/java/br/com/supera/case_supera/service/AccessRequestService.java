@@ -77,9 +77,13 @@ public class AccessRequestService {
                 .requestDate(LocalDateTime.now())
                 .build();
 
-        // Validar e processar automaticamente
+        // Salvar request primeiro para ter ID (necessário para o histórico)
+        request = accessRequestRepository.save(request);
+
+        // Validar e processar automaticamente (adiciona histórico se necessário)
         String result = processAutomaticValidation(request, user);
 
+        // Salvar novamente para persistir o histórico adicionado
         accessRequestRepository.save(request);
         return result;
     }
@@ -221,15 +225,29 @@ public class AccessRequestService {
     }
 
     private void addHistory(AccessRequest request, RequestStatus previousStatus, RequestStatus newStatus, String reason) {
-        AccessHistory history = AccessHistory.builder()
-                .accessRequest(request)
-                .previousStatus(previousStatus)
-                .newStatus(newStatus)
-                .changeDate(LocalDateTime.now())
-                .reason(reason)
-                .build();
-        accessHistoryRepository.save(history);
-        request.getHistory().add(history);
+        // Só adiciona histórico se o request já tiver ID (já foi persistido)
+        if (request.getId() != null) {
+            AccessHistory history = AccessHistory.builder()
+                    .accessRequest(request)
+                    .previousStatus(previousStatus)
+                    .newStatus(newStatus)
+                    .changeDate(LocalDateTime.now())
+                    .reason(reason)
+                    .build();
+            // Salva explicitamente já que o request tem ID
+            accessHistoryRepository.save(history);
+            request.getHistory().add(history);
+        } else {
+            // Se não tem ID ainda, apenas adiciona à lista (será salvo pelo cascade depois)
+            AccessHistory history = AccessHistory.builder()
+                    .accessRequest(request)
+                    .previousStatus(previousStatus)
+                    .newStatus(newStatus)
+                    .changeDate(LocalDateTime.now())
+                    .reason(reason)
+                    .build();
+            request.getHistory().add(history);
+        }
     }
 
     public Page<AccessRequestResponseDTO> getUserRequests(Long userId, String searchText, RequestStatus status,
