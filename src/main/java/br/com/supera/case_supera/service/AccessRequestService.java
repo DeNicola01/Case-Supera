@@ -288,7 +288,43 @@ public class AccessRequestService {
         return allowed.contains(department);
     }
 
+    /**
+     * Verifica se dois módulos são mutuamente exclusivos
+     * Validação baseada nas regras de negócio:
+     * - Aprovador Financeiro e Solicitante Financeiro são incompatíveis
+     * - Administrador RH e Colaborador RH são incompatíveis
+     */
     private boolean areIncompatible(Module module1, Module module2) {
+        if (module1 == null || module2 == null) {
+            return false;
+        }
+        
+        String name1 = module1.getName();
+        String name2 = module2.getName();
+        
+        // Aprovador Financeiro <-> Solicitante Financeiro
+        boolean isAprovadorFinanceiro = name1.equals("Aprovador Financeiro");
+        boolean isSolicitanteFinanceiro = name1.equals("Solicitante Financeiro");
+        boolean isOtherAprovadorFinanceiro = name2.equals("Aprovador Financeiro");
+        boolean isOtherSolicitanteFinanceiro = name2.equals("Solicitante Financeiro");
+        
+        if ((isAprovadorFinanceiro && isOtherSolicitanteFinanceiro) ||
+            (isSolicitanteFinanceiro && isOtherAprovadorFinanceiro)) {
+            return true;
+        }
+        
+        // Administrador RH <-> Colaborador RH
+        boolean isAdminRH = name1.equals("Administrador RH");
+        boolean isColaboradorRH = name1.equals("Colaborador RH");
+        boolean isOtherAdminRH = name2.equals("Administrador RH");
+        boolean isOtherColaboradorRH = name2.equals("Colaborador RH");
+        
+        if ((isAdminRH && isOtherColaboradorRH) ||
+            (isColaboradorRH && isOtherAdminRH)) {
+            return true;
+        }
+        
+        // Também verifica na tabela do banco (caso tenha sido populada)
         return module1.getIncompatibleModules().contains(module2) ||
                module2.getIncompatibleModules().contains(module1);
     }

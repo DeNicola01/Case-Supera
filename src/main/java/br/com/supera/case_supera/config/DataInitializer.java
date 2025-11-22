@@ -85,8 +85,7 @@ public class DataInitializer {
                     "Portal principal para colaboradores",
                     new HashSet<>(Arrays.asList(
                             Department.TI, Department.FINANCEIRO, Department.RH,
-                            Department.OPERACOES, Department.OUTROS)),
-                    new HashSet<>()
+                            Department.OPERACOES, Department.OUTROS))
             );
 
             // 2. Relatórios Gerenciais (todos os departamentos)
@@ -95,79 +94,151 @@ public class DataInitializer {
                     "Sistema de relatórios gerenciais",
                     new HashSet<>(Arrays.asList(
                             Department.TI, Department.FINANCEIRO, Department.RH,
-                            Department.OPERACOES, Department.OUTROS)),
-                    new HashSet<>()
+                            Department.OPERACOES, Department.OUTROS))
             );
 
             // 3. Gestão Financeira (Financeiro, TI)
             Module gestaoFinanceira = createOrUpdateModule(
                     "Gestão Financeira",
                     "Sistema de gestão financeira",
-                    new HashSet<>(Arrays.asList(Department.FINANCEIRO, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.FINANCEIRO, Department.TI))
             );
 
             // 4. Aprovador Financeiro (Financeiro, TI) *incompatível com #5
             Module aprovadorFinanceiro = createOrUpdateModule(
                     "Aprovador Financeiro",
                     "Módulo para aprovação de solicitações financeiras",
-                    new HashSet<>(Arrays.asList(Department.FINANCEIRO, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.FINANCEIRO, Department.TI))
             );
 
             // 5. Solicitante Financeiro (Financeiro, TI) *incompatível com #4
             Module solicitanteFinanceiro = createOrUpdateModule(
                     "Solicitante Financeiro",
                     "Módulo para solicitação de recursos financeiros",
-                    new HashSet<>(Arrays.asList(Department.FINANCEIRO, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.FINANCEIRO, Department.TI))
             );
-
-            // Configurar incompatibilidade entre Aprovador Financeiro (#4) e Solicitante Financeiro (#5)
-            configureIncompatibility(aprovadorFinanceiro, solicitanteFinanceiro);
 
             // 6. Administrador RH (RH, TI) *incompatível com #7
             Module adminRH = createOrUpdateModule(
                     "Administrador RH",
                     "Módulo administrativo de recursos humanos",
-                    new HashSet<>(Arrays.asList(Department.RH, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.RH, Department.TI))
             );
 
             // 7. Colaborador RH (RH, TI) *incompatível com #6
             Module colaboradorRH = createOrUpdateModule(
                     "Colaborador RH",
                     "Módulo para colaboradores do RH",
-                    new HashSet<>(Arrays.asList(Department.RH, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.RH, Department.TI))
             );
-
-            // Configurar incompatibilidade entre Administrador RH (#6) e Colaborador RH (#7)
-            configureIncompatibility(adminRH, colaboradorRH);
 
             // 8. Gestão de Estoque (Operações, TI)
             Module estoque = createOrUpdateModule(
                     "Gestão de Estoque",
                     "Sistema de gestão de estoque",
-                    new HashSet<>(Arrays.asList(Department.OPERACOES, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.OPERACOES, Department.TI))
             );
 
             // 9. Compras (Operações, TI)
             Module compras = createOrUpdateModule(
                     "Compras",
                     "Sistema de gestão de compras",
-                    new HashSet<>(Arrays.asList(Department.OPERACOES, Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.OPERACOES, Department.TI))
             );
 
             // 10. Auditoria (apenas TI)
             Module auditoria = createOrUpdateModule(
                     "Auditoria",
                     "Módulo de auditoria do sistema",
-                    new HashSet<>(Arrays.asList(Department.TI)),
-                    new HashSet<>()
+                    new HashSet<>(Arrays.asList(Department.TI))
             );
+
+            // Configurar incompatibilidades diretamente na tabela module_incompatibilities
+            System.out.println("Configurando incompatibilidades na tabela...");
+            
+            System.out.println("IDs dos módulos:");
+            System.out.println("  Aprovador Financeiro: " + aprovadorFinanceiro.getId());
+            System.out.println("  Solicitante Financeiro: " + solicitanteFinanceiro.getId());
+            System.out.println("  Administrador RH: " + adminRH.getId());
+            System.out.println("  Colaborador RH: " + colaboradorRH.getId());
+
+            // Limpar incompatibilidades existentes para evitar duplicatas
+            int deleted = entityManager.createNativeQuery(
+                    "DELETE FROM module_incompatibilities"
+            ).executeUpdate();
+            System.out.println("Registros deletados: " + deleted);
+
+            // Inserir incompatibilidades diretamente na tabela
+            // 1. Aprovador Financeiro -> Solicitante Financeiro
+            int result1 = entityManager.createNativeQuery(
+                    "INSERT INTO module_incompatibilities (module_id, incompatible_module_id) " +
+                    "SELECT ?::bigint, ?::bigint " +
+                    "WHERE NOT EXISTS (" +
+                    "  SELECT 1 FROM module_incompatibilities " +
+                    "  WHERE module_id = ?::bigint AND incompatible_module_id = ?::bigint" +
+                    ")"
+            )
+            .setParameter(1, aprovadorFinanceiro.getId())
+            .setParameter(2, solicitanteFinanceiro.getId())
+            .setParameter(3, aprovadorFinanceiro.getId())
+            .setParameter(4, solicitanteFinanceiro.getId())
+            .executeUpdate();
+            System.out.println("Inserido Aprovador -> Solicitante: " + result1);
+
+            // 2. Solicitante Financeiro -> Aprovador Financeiro
+            int result2 = entityManager.createNativeQuery(
+                    "INSERT INTO module_incompatibilities (module_id, incompatible_module_id) " +
+                    "SELECT ?::bigint, ?::bigint " +
+                    "WHERE NOT EXISTS (" +
+                    "  SELECT 1 FROM module_incompatibilities " +
+                    "  WHERE module_id = ?::bigint AND incompatible_module_id = ?::bigint" +
+                    ")"
+            )
+            .setParameter(1, solicitanteFinanceiro.getId())
+            .setParameter(2, aprovadorFinanceiro.getId())
+            .setParameter(3, solicitanteFinanceiro.getId())
+            .setParameter(4, aprovadorFinanceiro.getId())
+            .executeUpdate();
+            System.out.println("Inserido Solicitante -> Aprovador: " + result2);
+
+            // 3. Administrador RH -> Colaborador RH
+            int result3 = entityManager.createNativeQuery(
+                    "INSERT INTO module_incompatibilities (module_id, incompatible_module_id) " +
+                    "SELECT ?::bigint, ?::bigint " +
+                    "WHERE NOT EXISTS (" +
+                    "  SELECT 1 FROM module_incompatibilities " +
+                    "  WHERE module_id = ?::bigint AND incompatible_module_id = ?::bigint" +
+                    ")"
+            )
+            .setParameter(1, adminRH.getId())
+            .setParameter(2, colaboradorRH.getId())
+            .setParameter(3, adminRH.getId())
+            .setParameter(4, colaboradorRH.getId())
+            .executeUpdate();
+            System.out.println("Inserido Admin RH -> Colaborador RH: " + result3);
+
+            // 4. Colaborador RH -> Administrador RH
+            int result4 = entityManager.createNativeQuery(
+                    "INSERT INTO module_incompatibilities (module_id, incompatible_module_id) " +
+                    "SELECT ?::bigint, ?::bigint " +
+                    "WHERE NOT EXISTS (" +
+                    "  SELECT 1 FROM module_incompatibilities " +
+                    "  WHERE module_id = ?::bigint AND incompatible_module_id = ?::bigint" +
+                    ")"
+            )
+            .setParameter(1, colaboradorRH.getId())
+            .setParameter(2, adminRH.getId())
+            .setParameter(3, colaboradorRH.getId())
+            .setParameter(4, adminRH.getId())
+            .executeUpdate();
+            System.out.println("Inserido Colaborador RH -> Admin RH: " + result4);
+
+            entityManager.flush();
+            
+            System.out.println("Incompatibilidades inseridas na tabela module_incompatibilities:");
+            System.out.println("  - Aprovador Financeiro (ID: " + aprovadorFinanceiro.getId() + ") <-> Solicitante Financeiro (ID: " + solicitanteFinanceiro.getId() + ")");
+            System.out.println("  - Administrador RH (ID: " + adminRH.getId() + ") <-> Colaborador RH (ID: " + colaboradorRH.getId() + ")");
+            
             System.out.println("Módulos inicializados com sucesso!");
             
         } catch (Exception e) {
@@ -180,15 +251,15 @@ public class DataInitializer {
      * Cria ou atualiza um módulo no banco de dados
      */
     private Module createOrUpdateModule(String name, String description, 
-                                       Set<Department> allowedDepartments, 
-                                       Set<Module> incompatibleModules) {
+                                       Set<Department> allowedDepartments) {
         return moduleRepository.findByName(name)
                 .map(existing -> {
                     // Se o módulo já existe, atualiza apenas se necessário
                     existing.setDescription(description);
                     existing.setActive(true);
                     existing.setAllowedDepartments(allowedDepartments);
-                    // Não atualiza incompatibleModules aqui, será feito depois
+                    // Limpar incompatibilidades existentes - serão reconfiguradas depois
+                    existing.setIncompatibleModules(new HashSet<>());
                     return moduleRepository.save(existing);
                 })
                 .orElseGet(() -> {
@@ -204,39 +275,5 @@ public class DataInitializer {
                 });
     }
 
-    /**
-     * Configura incompatibilidade bidirecional entre dois módulos
-     */
-    private void configureIncompatibility(Module module1, Module module2) {
-        try {
-            // Fazer flush para garantir que os módulos estão persistidos
-            entityManager.flush();
-            entityManager.clear();
-            
-            // Recarregar os módulos para garantir que estão na sessão do Hibernate
-            module1 = moduleRepository.findById(module1.getId()).orElse(module1);
-            module2 = moduleRepository.findById(module2.getId()).orElse(module2);
-            
-            // Configurar incompatibilidade bidirecional
-            Set<Module> module1Incompat = new HashSet<>(module1.getIncompatibleModules());
-            if (!module1Incompat.contains(module2)) {
-                module1Incompat.add(module2);
-                module1.setIncompatibleModules(module1Incompat);
-            }
-            
-            Set<Module> module2Incompat = new HashSet<>(module2.getIncompatibleModules());
-            if (!module2Incompat.contains(module1)) {
-                module2Incompat.add(module1);
-                module2.setIncompatibleModules(module2Incompat);
-            }
-            
-            moduleRepository.save(module1);
-            moduleRepository.save(module2);
-            
-            System.out.println("Incompatibilidade configurada entre: " + module1.getName() + " <-> " + module2.getName());
-        } catch (Exception e) {
-            System.err.println("Erro ao configurar incompatibilidade entre " + module1.getName() + " e " + module2.getName() + ": " + e.getMessage());
-        }
-    }
 }
 
