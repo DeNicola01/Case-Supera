@@ -17,13 +17,24 @@ import br.com.supera.case_supera.repository.AccessRequestRepository;
 import br.com.supera.case_supera.repository.ModuleRepository;
 import br.com.supera.case_supera.repository.UserModuleRepository;
 import br.com.supera.case_supera.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Join;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -37,6 +48,9 @@ public class AccessRequestService {
     private final ModuleRepository moduleRepository;
     private final UserModuleRepository userModuleRepository;
     private final AccessHistoryRepository accessHistoryRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public AccessRequestService(
             AccessRequestRepository accessRequestRepository,
@@ -96,14 +110,8 @@ public class AccessRequestService {
             }
         }
 
-        // Validar solicitação ativa para mesmo módulo
-        for (Module module : requestedModules) {
-            List<AccessRequest> activeRequests = accessRequestRepository
-                    .findActiveRequestsByUserAndModule(user, module);
-            if (!activeRequests.isEmpty()) {
-                throw new BusinessException("Você já possui uma solicitação ativa para o módulo: " + module.getName());
-            }
-        }
+        // Validação de solicitação ativa removida para permitir renovações
+        // A validação de acesso já existente (via UserModule) abaixo já cobre esse caso
 
         // Validar acesso já existente
         List<Module> activeModules = userModuleRepository.findActiveModulesByUser(user);
@@ -179,7 +187,9 @@ public class AccessRequestService {
         // Aprovar e conceder acesso
         request.setStatus(RequestStatus.ATIVO);
         request.setExpirationDate(LocalDateTime.now().plusDays(180));
-        addHistory(request, null, RequestStatus.ATIVO, "Solicitação aprovada automaticamente");
+        // Para solicitações novas aprovadas automaticamente, não há status anterior real
+        // Usamos ATIVO como status "anterior" apenas para satisfazer a constraint NOT NULL do banco
+        addHistory(request, RequestStatus.ATIVO, RequestStatus.ATIVO, "Solicitação aprovada automaticamente");
 
         // Conceder acesso aos módulos
         for (Module module : request.getRequestedModules()) {
@@ -194,6 +204,73 @@ public class AccessRequestService {
         }
 
         return "Solicitação criada com sucesso! Protocolo: " + request.getProtocol() + ". Seus acessos já estão disponíveis!";
+    }
+
+    /**
+     * Processa validação automática para renovação de acesso
+     * Similar ao processAutomaticValidation, mas não valida acesso já existente
+     * (pois estamos renovando acessos que já existem)
+     */
+    private String processRenewalValidation(AccessRequest request, User user, AccessRequest originalRequest) {
+        // Validar compatibilidade de departamento
+        for (Module module : request.getRequestedModules()) {
+            if (!isDepartmentAllowed(user.getDepartment(), module)) {
+                request.setStatus(RequestStatus.NEGADO);
+                request.setDenialReason("Departamento sem permissão para acessar este módulo");
+                addHistory(request, RequestStatus.ATIVO, RequestStatus.NEGADO, request.getDenialReason());
+                return "Renovação negada. Motivo: " + request.getDenialReason();
+            }
+        }
+
+        // Na renovação, não validamos se há outras solicitações ativas porque:
+        // 1. Estamos renovando uma solicitação existente (a original)
+        // 2. A nova solicitação de renovação acabou de ser criada e também está ativa
+        // Isso é o comportamento esperado para renovações
+
+        // Validar módulos mutuamente exclusivos com outros módulos ativos
+        // (excluindo os módulos que estão sendo renovados)
+        List<Module> activeModules = userModuleRepository.findActiveModulesByUser(user);
+        Set<Module> modulesBeingRenewed = request.getRequestedModules();
+        
+        // Obter IDs dos módulos da solicitação original para excluir da validação
+        Set<Long> originalModuleIds = originalRequest.getRequestedModules().stream()
+                .map(Module::getId)
+                .collect(Collectors.toSet());
+        
+        for (Module requestedModule : request.getRequestedModules()) {
+            for (Module activeModule : activeModules) {
+                // Ignorar se o módulo ativo é um dos que está sendo renovado (da solicitação original)
+                if (originalModuleIds.contains(activeModule.getId())) {
+                    continue;
+                }
+                if (areIncompatible(requestedModule, activeModule)) {
+                    request.setStatus(RequestStatus.NEGADO);
+                    request.setDenialReason("Módulo incompatível com outro módulo já ativo em seu perfil");
+                    addHistory(request, RequestStatus.ATIVO, RequestStatus.NEGADO, request.getDenialReason());
+                    return "Renovação negada. Motivo: " + request.getDenialReason();
+                }
+            }
+        }
+
+        // Validar módulos mutuamente exclusivos entre os solicitados
+        List<Module> requestedList = List.copyOf(request.getRequestedModules());
+        for (int i = 0; i < requestedList.size(); i++) {
+            for (int j = i + 1; j < requestedList.size(); j++) {
+                if (areIncompatible(requestedList.get(i), requestedList.get(j))) {
+                    request.setStatus(RequestStatus.NEGADO);
+                    request.setDenialReason("Módulo incompatível com outro módulo já ativo em seu perfil");
+                    addHistory(request, RequestStatus.ATIVO, RequestStatus.NEGADO, request.getDenialReason());
+                    return "Renovação negada. Motivo: " + request.getDenialReason();
+                }
+            }
+        }
+
+        // Para renovação, não validamos limite de módulos pois estamos apenas estendendo acessos existentes
+        // Aprovar renovação
+        request.setStatus(RequestStatus.ATIVO);
+        addHistory(request, RequestStatus.ATIVO, RequestStatus.ATIVO, "Renovação aprovada automaticamente");
+
+        return "Renovação aprovada";
     }
 
     private boolean isDepartmentAllowed(Department department, Module module) {
@@ -256,10 +333,97 @@ public class AccessRequestService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado"));
 
-        Page<AccessRequest> requests = accessRequestRepository.findByUserWithFilters(
-                user, searchText, status, urgent, startDate, endDate, pageable);
-
-        return requests.map(this::toDTO);
+        // Usar Criteria API para construir query dinamicamente
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<AccessRequest> query = cb.createQuery(AccessRequest.class);
+        Root<AccessRequest> root = query.from(AccessRequest.class);
+        
+        List<Predicate> predicates = new ArrayList<>();
+        
+        // Filtro obrigatório: usuário
+        predicates.add(cb.equal(root.get("user"), user));
+        
+        // Filtro: searchText (protocolo ou nome do módulo)
+        if (searchText != null && !searchText.trim().isEmpty()) {
+            String searchPattern = "%" + searchText.trim() + "%";
+            Predicate protocolMatch = cb.like(root.get("protocol"), searchPattern);
+            
+            // Buscar por nome do módulo
+            Join<AccessRequest, Module> moduleJoin = root.join("requestedModules");
+            Predicate moduleNameMatch = cb.like(moduleJoin.get("name"), searchPattern);
+            
+            predicates.add(cb.or(protocolMatch, moduleNameMatch));
+        }
+        
+        // Filtro: status
+        if (status != null) {
+            predicates.add(cb.equal(root.get("status"), status));
+        }
+        
+        // Filtro: urgent
+        if (urgent != null) {
+            predicates.add(cb.equal(root.get("urgent"), urgent));
+        }
+        
+        // Filtro: startDate
+        if (startDate != null) {
+            predicates.add(cb.greaterThanOrEqualTo(root.get("requestDate"), startDate));
+        }
+        
+        // Filtro: endDate
+        if (endDate != null) {
+            predicates.add(cb.lessThanOrEqualTo(root.get("requestDate"), endDate));
+        }
+        
+        query.where(predicates.toArray(new Predicate[0]));
+        query.orderBy(cb.desc(root.get("requestDate")));
+        
+        // Contar total (usar DISTINCT para evitar duplicatas por causa do join com módulos)
+        CriteriaQuery<Long> countQuery = cb.createQuery(Long.class);
+        Root<AccessRequest> countRoot = countQuery.from(AccessRequest.class);
+        countQuery.select(cb.countDistinct(countRoot));
+        
+        List<Predicate> countPredicates = new ArrayList<>();
+        countPredicates.add(cb.equal(countRoot.get("user"), user));
+        
+        if (searchText != null && !searchText.trim().isEmpty()) {
+            String searchPattern = "%" + searchText.trim() + "%";
+            Predicate protocolMatch = cb.like(countRoot.get("protocol"), searchPattern);
+            Join<AccessRequest, Module> moduleJoin = countRoot.join("requestedModules");
+            Predicate moduleNameMatch = cb.like(moduleJoin.get("name"), searchPattern);
+            countPredicates.add(cb.or(protocolMatch, moduleNameMatch));
+        }
+        
+        if (status != null) {
+            countPredicates.add(cb.equal(countRoot.get("status"), status));
+        }
+        
+        if (urgent != null) {
+            countPredicates.add(cb.equal(countRoot.get("urgent"), urgent));
+        }
+        
+        if (startDate != null) {
+            countPredicates.add(cb.greaterThanOrEqualTo(countRoot.get("requestDate"), startDate));
+        }
+        
+        if (endDate != null) {
+            countPredicates.add(cb.lessThanOrEqualTo(countRoot.get("requestDate"), endDate));
+        }
+        
+        countQuery.where(countPredicates.toArray(new Predicate[0]));
+        
+        Long total = entityManager.createQuery(countQuery).getSingleResult();
+        
+        // Buscar resultados paginados
+        TypedQuery<AccessRequest> typedQuery = entityManager.createQuery(query);
+        typedQuery.setFirstResult((int) pageable.getOffset());
+        typedQuery.setMaxResults(pageable.getPageSize());
+        
+        List<AccessRequest> requests = typedQuery.getResultList();
+        
+        Page<AccessRequest> page = new PageImpl<>(requests, pageable, total);
+        
+        return page.map(this::toDTO);
     }
 
     public AccessRequestResponseDTO getRequestDetails(Long userId, Long requestId) {
@@ -273,6 +437,7 @@ public class AccessRequestService {
         return toDTO(request);
     }
 
+    @Transactional
     public String renewAccess(Long userId, Long requestId) {
         AccessRequest originalRequest = accessRequestRepository.findById(requestId)
                 .orElseThrow(() -> new ResourceNotFoundException("Solicitação não encontrada"));
@@ -289,40 +454,99 @@ public class AccessRequestService {
             throw new BusinessException("Solicitação não possui data de expiração");
         }
 
+        // Validar que faltam 30 dias ou menos para expiração
         LocalDateTime now = LocalDateTime.now();
-        if (originalRequest.getExpirationDate().isAfter(now.plusDays(30))) {
-            throw new BusinessException("Renovação só é permitida quando faltam menos de 30 dias para expiração");
-        }
-
-        // Criar nova solicitação vinculada
-        AccessRequestDTO newRequestDTO = new AccessRequestDTO();
-        newRequestDTO.setModuleIds(originalRequest.getRequestedModules().stream()
-                .map(Module::getId)
-                .collect(Collectors.toList()));
-        newRequestDTO.setJustification("Renovação de acesso - " + originalRequest.getJustification());
-        newRequestDTO.setUrgent(originalRequest.getUrgent());
-
-        String result = createAccessRequest(userId, newRequestDTO);
+        LocalDateTime expirationDate = originalRequest.getExpirationDate();
         
-        // Extrair protocolo do resultado para vincular à solicitação original
-        // Formato esperado: "Solicitação criada com sucesso! Protocolo: SOL-20240101-0001. Seus acessos já estão disponíveis!"
-        String protocolStart = "Protocolo: ";
-        int startIdx = result.indexOf(protocolStart);
-        if (startIdx >= 0) {
-            startIdx += protocolStart.length();
-            int endIdx = result.indexOf(".", startIdx);
-            if (endIdx > startIdx) {
-                String newProtocol = result.substring(startIdx, endIdx).trim();
-                AccessRequest newRequest = accessRequestRepository.findByProtocol(newProtocol)
-                        .orElse(null);
-                if (newRequest != null) {
-                    newRequest.setRenewedFrom(originalRequest);
-                    accessRequestRepository.save(newRequest);
-                }
+        // Se a data de expiração já passou, permitir renovação
+        if (expirationDate.isBefore(now)) {
+            // Já expirado, pode renovar
+        } else {
+            // Calcular dias até expiração (inclusive)
+            long daysUntilExpiration = java.time.Duration.between(now, expirationDate).toDays();
+            
+            // Permitir renovação se faltam 30 dias ou menos (<= 30)
+            if (daysUntilExpiration > 30) {
+                throw new BusinessException("Renovação só é permitida quando faltam 30 dias ou menos para expiração. Faltam " + daysUntilExpiration + " dias.");
             }
         }
 
-        return result;
+        User user = originalRequest.getUser();
+        Set<Module> modulesToRenew = originalRequest.getRequestedModules();
+
+        // Validar módulos ainda ativos
+        for (Module module : modulesToRenew) {
+            if (!module.getActive()) {
+                throw new BusinessException("Módulo não está mais ativo: " + module.getName());
+            }
+        }
+
+        // Gerar novo protocolo
+        String newProtocol = generateProtocol();
+
+        // Criar nova solicitação vinculada à original
+        AccessRequest newRequest = AccessRequest.builder()
+                .protocol(newProtocol)
+                .user(user)
+                .requestedModules(new HashSet<>(modulesToRenew))
+                .justification("Renovação de acesso - " + originalRequest.getJustification())
+                .urgent(originalRequest.getUrgent())
+                .requestDate(LocalDateTime.now())
+                .renewedFrom(originalRequest)
+                .build();
+
+        // Salvar request primeiro para ter ID
+        newRequest = accessRequestRepository.save(newRequest);
+
+        // Reaplicar regras de negócio (validações) - versão para renovação
+        // Esta validação não verifica se já existe solicitação ativa (pois estamos renovando)
+        String validationResult = processRenewalValidation(newRequest, user, originalRequest);
+
+        // Se foi negado, retornar o motivo
+        if (newRequest.getStatus() == RequestStatus.NEGADO) {
+            accessRequestRepository.save(newRequest);
+            return validationResult;
+        }
+
+        // Se aprovado, estender validade dos acessos existentes por mais 180 dias
+        LocalDateTime newExpirationDate = LocalDateTime.now().plusDays(180);
+        newRequest.setExpirationDate(newExpirationDate);
+        
+        // Atualizar histórico com mensagem mais detalhada sobre a renovação
+        if (!newRequest.getHistory().isEmpty()) {
+            AccessHistory lastHistory = newRequest.getHistory().get(newRequest.getHistory().size() - 1);
+            lastHistory.setReason("Renovação aprovada automaticamente - acesso estendido por 180 dias até " + 
+                                     newExpirationDate.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+            accessHistoryRepository.save(lastHistory);
+        }
+
+        // Estender validade dos UserModules existentes
+        for (Module module : modulesToRenew) {
+            userModuleRepository.findByUserAndModuleAndActiveTrue(user, module)
+                    .ifPresentOrElse(
+                            userModule -> {
+                                // Estender validade do acesso existente
+                                userModule.setExpirationDate(newExpirationDate);
+                                userModuleRepository.save(userModule);
+                            },
+                            () -> {
+                                // Se não existe UserModule ativo, criar novo (caso tenha sido desativado)
+                                UserModule newUserModule = UserModule.builder()
+                                        .user(user)
+                                        .module(module)
+                                        .grantedDate(LocalDateTime.now())
+                                        .expirationDate(newExpirationDate)
+                                        .active(true)
+                                        .build();
+                                userModuleRepository.save(newUserModule);
+                            }
+                    );
+        }
+
+        // Salvar novamente para persistir o histórico
+        accessRequestRepository.save(newRequest);
+
+        return "Renovação realizada com sucesso! Protocolo: " + newProtocol + ". Seus acessos foram estendidos por mais 180 dias até " + newExpirationDate.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")) + ".";
     }
 
     public void cancelRequest(Long userId, Long requestId, String reason) {
