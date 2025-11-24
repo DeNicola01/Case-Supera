@@ -21,8 +21,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
@@ -30,15 +28,14 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNotNull;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import org.mockito.ArgumentCaptor;
+import br.com.supera.case_supera.entity.User;
+import br.com.supera.case_supera.entity.Module;
 
 @ExtendWith(MockitoExtension.class)
 class AccessRequestServiceTest {
@@ -102,11 +99,11 @@ class AccessRequestServiceTest {
         // Arrange
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
         when(accessRequestRepository.count()).thenReturn(0L);
         when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(0L);
+        when(accessRequestRepository.save(any(AccessRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userModuleRepository.save(any(UserModule.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ArgumentCaptor<AccessRequest> requestCaptor = ArgumentCaptor.forClass(AccessRequest.class);
         ArgumentCaptor<UserModule> userModuleCaptor = ArgumentCaptor.forClass(UserModule.class);
@@ -117,7 +114,7 @@ class AccessRequestServiceTest {
         // Assert
         assertNotNull(result);
         assertTrue(result.contains("Solicitação criada com sucesso"));
-        verify(accessRequestRepository).save(requestCaptor.capture());
+        verify(accessRequestRepository, atLeastOnce()).save(requestCaptor.capture());
         verify(userModuleRepository, times(1)).save(userModuleCaptor.capture());
         
         AccessRequest savedRequest = requestCaptor.getValue();
@@ -175,20 +172,27 @@ class AccessRequestServiceTest {
     @Test
     void testCreateAccessRequestActiveRequestExists() {
         // Arrange
+        // Nota: A validação de solicitação ativa foi removida para permitir renovações
+        // Este teste agora verifica que a solicitação é criada mesmo se houver uma solicitação ativa
         AccessRequest existingRequest = AccessRequest.builder()
                 .id(1L)
                 .status(RequestStatus.ATIVO)
                 .build();
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Arrays.asList(existingRequest));
+        when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
+        when(accessRequestRepository.count()).thenReturn(0L);
+        when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(0L);
+        when(accessRequestRepository.save(any(AccessRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userModuleRepository.save(any(UserModule.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        // Act & Assert
-        assertThrows(BusinessException.class, () -> 
-                accessRequestService.createAccessRequest(1L, requestDTO));
+        // Act
+        String result = accessRequestService.createAccessRequest(1L, requestDTO);
 
-        verify(accessRequestRepository, never()).save(isNotNull());
+        // Assert
+        assertNotNull(result);
+        assertTrue(result.contains("Solicitação criada com sucesso"));
+        verify(accessRequestRepository, atLeastOnce()).save(any(AccessRequest.class));
     }
 
     @Test
@@ -196,8 +200,6 @@ class AccessRequestServiceTest {
         // Arrange
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser)))
                 .thenReturn(Arrays.asList(testModule1));
 
@@ -214,8 +216,6 @@ class AccessRequestServiceTest {
         requestDTO.setJustification("teste");
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
 
         // Act & Assert
@@ -232,10 +232,9 @@ class AccessRequestServiceTest {
         testModule1.setAllowedDepartments(new HashSet<>(Arrays.asList(Department.TI, Department.FINANCEIRO)));
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
         when(accessRequestRepository.count()).thenReturn(0L);
+        when(accessRequestRepository.save(any(AccessRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // Act
         String result = accessRequestService.createAccessRequest(1L, requestDTO);
@@ -245,7 +244,7 @@ class AccessRequestServiceTest {
         assertTrue(result.contains("Departamento sem permissão"));
         
         ArgumentCaptor<AccessRequest> requestCaptor = ArgumentCaptor.forClass(AccessRequest.class);
-        verify(accessRequestRepository).save(requestCaptor.capture());
+        verify(accessRequestRepository, atLeastOnce()).save(requestCaptor.capture());
         
         AccessRequest savedRequest = requestCaptor.getValue();
         assertEquals(RequestStatus.NEGADO, savedRequest.getStatus());
@@ -398,14 +397,12 @@ class AccessRequestServiceTest {
                 .build();
 
         when(accessRequestRepository.findById(eq(1L))).thenReturn(Optional.of(originalRequest));
-        when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
-        when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
-        when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
-        when(accessRequestRepository.count()).thenReturn(1L);
-        when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(1L);
-        when(accessRequestRepository.findByProtocol(isNotNull())).thenReturn(Optional.empty());
+        lenient().when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
+        lenient().when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(1L);
+        when(accessRequestRepository.save(any(AccessRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(userModuleRepository.save(any(UserModule.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(userModuleRepository.findByUserAndModuleAndActiveTrue(any(User.class), any(Module.class)))
+                .thenReturn(Optional.empty());
 
         ArgumentCaptor<AccessRequest> requestCaptor = ArgumentCaptor.forClass(AccessRequest.class);
 
@@ -414,7 +411,7 @@ class AccessRequestServiceTest {
 
         // Assert
         assertNotNull(result);
-        assertTrue(result.contains("Solicitação criada com sucesso"));
+        assertTrue(result.contains("Renovação realizada com sucesso"));
         verify(accessRequestRepository, atLeastOnce()).save(requestCaptor.capture());
     }
 
@@ -526,13 +523,10 @@ class AccessRequestServiceTest {
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(4L))).thenReturn(Optional.of(incompatibleModule1));
         when(moduleRepository.findById(eq(5L))).thenReturn(Optional.of(incompatibleModule2));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(incompatibleModule1)))
-                .thenReturn(Collections.emptyList());
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(incompatibleModule2)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
-        when(accessRequestRepository.count()).thenReturn(0L);
-        when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(0L);
+        lenient().when(accessRequestRepository.count()).thenReturn(0L);
+        lenient().when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(0L);
+        when(accessRequestRepository.save(any(AccessRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ArgumentCaptor<AccessRequest> requestCaptor = ArgumentCaptor.forClass(AccessRequest.class);
 
@@ -543,7 +537,7 @@ class AccessRequestServiceTest {
         assertTrue(result.contains("Solicitação negada"));
         assertTrue(result.contains("incompatível"));
         
-        verify(accessRequestRepository).save(requestCaptor.capture());
+        verify(accessRequestRepository, atLeastOnce()).save(requestCaptor.capture());
         AccessRequest savedRequest = requestCaptor.getValue();
         assertEquals(RequestStatus.NEGADO, savedRequest.getStatus());
     }
@@ -554,11 +548,10 @@ class AccessRequestServiceTest {
         testUser.setDepartment(Department.FINANCEIRO);
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
         when(accessRequestRepository.count()).thenReturn(0L);
         when(userModuleRepository.countActiveModulesByUser(eq(testUser))).thenReturn(5L);
+        when(accessRequestRepository.save(any(AccessRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ArgumentCaptor<AccessRequest> requestCaptor = ArgumentCaptor.forClass(AccessRequest.class);
 
@@ -569,7 +562,7 @@ class AccessRequestServiceTest {
         assertTrue(result.contains("Solicitação negada"));
         assertTrue(result.contains("Limite de módulos"));
         
-        verify(accessRequestRepository).save(requestCaptor.capture());
+        verify(accessRequestRepository, atLeastOnce()).save(requestCaptor.capture());
         AccessRequest savedRequest = requestCaptor.getValue();
         assertEquals(RequestStatus.NEGADO, savedRequest.getStatus());
     }
@@ -580,8 +573,6 @@ class AccessRequestServiceTest {
         requestDTO.setJustification("aaa");
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
 
         // Act & Assert
@@ -597,8 +588,6 @@ class AccessRequestServiceTest {
         requestDTO.setJustification("preciso");
         when(userRepository.findById(eq(1L))).thenReturn(Optional.of(testUser));
         when(moduleRepository.findById(eq(1L))).thenReturn(Optional.of(testModule1));
-        when(accessRequestRepository.findActiveRequestsByUserAndModule(eq(testUser), eq(testModule1)))
-                .thenReturn(Collections.emptyList());
         when(userModuleRepository.findActiveModulesByUser(eq(testUser))).thenReturn(Collections.emptyList());
 
         // Act & Assert

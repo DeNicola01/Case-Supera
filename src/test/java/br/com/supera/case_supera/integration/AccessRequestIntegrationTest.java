@@ -58,14 +58,18 @@ class AccessRequestIntegrationTest {
                 .build();
         testUser = userRepository.save(testUser);
 
-        testModule = Module.builder()
-                .name("Portal do Colaborador")
-                .description("Portal principal")
-                .active(true)
-                .allowedDepartments(new HashSet<>(Arrays.asList(Department.TI)))
-                .incompatibleModules(new HashSet<>())
-                .build();
-        testModule = moduleRepository.save(testModule);
+        // Verificar se o módulo já existe (criado pelo DataInitializer)
+        testModule = moduleRepository.findByName("Portal do Colaborador")
+                .orElseGet(() -> {
+                    Module newModule = Module.builder()
+                            .name("Portal do Colaborador")
+                            .description("Portal principal")
+                            .active(true)
+                            .allowedDepartments(new HashSet<>(Arrays.asList(Department.TI)))
+                            .incompatibleModules(new HashSet<>())
+                            .build();
+                    return moduleRepository.save(newModule);
+                });
     }
 
     @Test
